@@ -1,6 +1,12 @@
 package com.devicestats.android;
 
+import android.app.WallpaperManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.TabLayout;
@@ -12,12 +18,16 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.Toast;
 
+import java.io.IOException;
+
 public class MainActivity extends AppCompatActivity {
 
     private static String filename = "devicestats.txt";
 
     private DeviceStats mDeviceStats;
     private String mDeviceStatsString;
+    private ViewPager mViewPager;
+    private WallpaperObserver mWallpaperReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,6 +36,12 @@ public class MainActivity extends AppCompatActivity {
 
         initStats();
         initViews();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        unregisterReceiver(mWallpaperReceiver);
     }
 
     private void initStats() {
@@ -41,14 +57,14 @@ public class MainActivity extends AppCompatActivity {
 
         TabLayout tabLayout = (TabLayout) findViewById(R.id.tabs);
 
-        ViewPager viewPager = (ViewPager) findViewById(R.id.viewpager);
+        mViewPager = (ViewPager) findViewById(R.id.viewpager);
         DeviceStatsAdapter adapter = new DeviceStatsAdapter(this, getSupportFragmentManager(), mDeviceStats);
-        viewPager.setOffscreenPageLimit(4);
-        viewPager.setAdapter(adapter);
+        mViewPager.setOffscreenPageLimit(4);
+        mViewPager.setAdapter(adapter);
 
         tabLayout.setTabsFromPagerAdapter(adapter);
-        tabLayout.setupWithViewPager(viewPager);
-        viewPager.addOnPageChangeListener(new TabLayout.TabLayoutOnPageChangeListener(tabLayout));
+        tabLayout.setupWithViewPager(mViewPager);
+        mViewPager.addOnPageChangeListener(new TabLayout.TabLayoutOnPageChangeListener(tabLayout));
 
         //TODO - maybe move this share back to action bar menu as does get in the way of data
         FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
@@ -58,6 +74,10 @@ public class MainActivity extends AppCompatActivity {
                 shareAllDeviceStatsText();
             }
         });
+
+        IntentFilter filter = new IntentFilter(Intent.ACTION_WALLPAPER_CHANGED);
+        mWallpaperReceiver = new WallpaperObserver();
+        registerReceiver(mWallpaperReceiver, filter);
     }
 
     private void shareAllDeviceStatsText() {
@@ -78,20 +98,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         long id = item.getItemId();
-        //TODO - maybe reitegrate this but replaced with simple share above
-        /*if (R.id.menu_share == id) {
-            Intent emailIntent = Utils.newEmailIntent(getApplicationContext(), null,
-                    "DeviceStats " + Utils.getAppVersion(this), mDeviceStatsString, true);
-            try {
-                startActivity(emailIntent);
-            } catch (ActivityNotFoundException e) {
-                Intent shareIntent = Utils.newEmailIntent(getApplicationContext(),
-                        null, "DeviceStats " + Utils.getAppVersion(this), mDeviceStatsString, false);
-                startActivity(Intent.createChooser(shareIntent, "Share via"));
-            }
+        if (R.id.menu_screenshot == id) {
+            setScreenAsWallpaper();
             return true;
-        } else*/
-            if (R.id.menu_save_to_sd == id) {
+        } else if (R.id.menu_save_to_sd == id) {
             try {
                 Utils.dumpDataToSD(filename, mDeviceStatsString);
                 Toast.makeText(getApplicationContext(), "Saved to " + filename,
@@ -104,5 +114,61 @@ public class MainActivity extends AppCompatActivity {
 
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    private void setScreenAsWallpaper() {
+        WallpaperTask wallpaperTask = new WallpaperTask(this);
+        wallpaperTask.execute();
+    }
+
+    public Bitmap takeScreenShot(View view) {
+        view = getWindow().getDecorView().getRootView();
+
+        view.setDrawingCacheEnabled(true);
+        view.setDrawingCacheQuality(View.DRAWING_CACHE_QUALITY_LOW);
+        view.buildDrawingCache();
+
+        if(view.getDrawingCache() == null) return null;
+
+        Bitmap snapshot = Bitmap.createBitmap(view.getDrawingCache());
+        view.setDrawingCacheEnabled(false);
+        view.destroyDrawingCache();
+
+        return snapshot;
+    }
+
+    private class WallpaperObserver extends BroadcastReceiver {
+        public void onReceive(Context context, Intent intent) {
+            Toast.makeText(context, "Wallpaper set", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private class WallpaperTask extends AsyncTask<Void, Void, String> {
+
+        private Context context;
+
+        public WallpaperTask(Context context) {
+            this.context = context;
+        }
+
+        @Override
+        protected String doInBackground(Void... voids) {
+            Bitmap bitmap = takeScreenShot(mViewPager);
+            WallpaperManager wallpaperManager = WallpaperManager.getInstance(getApplicationContext());
+            try {
+                wallpaperManager.setBitmap(bitmap);
+            } catch (IOException e) {
+                return "Error setting Wallpaper";
+            }
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(String errorString) {
+            super.onPostExecute(errorString);
+            if (errorString != null) {
+                Toast.makeText(context, errorString, Toast.LENGTH_LONG).show();
+            }
+        }
     }
 }
